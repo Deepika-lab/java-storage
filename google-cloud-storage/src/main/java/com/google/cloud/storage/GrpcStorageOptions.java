@@ -28,6 +28,7 @@ import com.google.api.core.ObsoleteApi;
 import com.google.api.gax.core.CredentialsProvider;
 import com.google.api.gax.core.FixedCredentialsProvider;
 import com.google.api.gax.core.NoCredentialsProvider;
+import com.google.api.gax.grpc.ChannelPoolSettings;
 import com.google.api.gax.grpc.GrpcCallSettings;
 import com.google.api.gax.grpc.GrpcInterceptorProvider;
 import com.google.api.gax.grpc.GrpcStubCallableFactory;
@@ -122,6 +123,7 @@ import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.logging.Logger;
 import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
  * @since 2.14.0
@@ -148,6 +150,9 @@ public final class GrpcStorageOptions extends StorageOptions
   private final GrpcInterceptorProvider grpcInterceptorProvider;
   private final BlobWriteSessionConfig blobWriteSessionConfig;
   private transient OpenTelemetry openTelemetry;
+  // ChannelPoolSettings is not Serializable, so this must be transient. A null value (including
+  // after deserialization) means "unset", in which case the default channel pool is used.
+  private transient ChannelPoolSettings channelPoolSettings;
 
   private GrpcStorageOptions(Builder builder, GrpcStorageDefaults serviceDefaults) {
     super(builder, serviceDefaults);
@@ -165,6 +170,7 @@ public final class GrpcStorageOptions extends StorageOptions
     this.grpcInterceptorProvider = builder.grpcInterceptorProvider;
     this.blobWriteSessionConfig = builder.blobWriteSessionConfig;
     this.openTelemetry = builder.openTelemetry;
+    this.channelPoolSettings = builder.channelPoolSettings;
   }
 
   @Override
@@ -190,6 +196,12 @@ public final class GrpcStorageOptions extends StorageOptions
   @InternalApi
   GrpcInterceptorProvider getGrpcInterceptorProvider() {
     return grpcInterceptorProvider;
+  }
+
+  @InternalApi
+  @Nullable
+  ChannelPoolSettings getChannelPoolSettings() {
+    return channelPoolSettings;
   }
 
   private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
@@ -333,6 +345,10 @@ public final class GrpcStorageOptions extends StorageOptions
       channelProviderBuilder.setInterceptorProvider(grpcInterceptorProvider);
     }
 
+    if (channelPoolSettings != null) {
+      channelProviderBuilder.setChannelPoolSettings(channelPoolSettings);
+    }
+
     if (attemptDirectPath) {
       channelProviderBuilder.setAttemptDirectPathXds();
     }
@@ -432,6 +448,7 @@ public final class GrpcStorageOptions extends StorageOptions
         grpcInterceptorProvider,
         blobWriteSessionConfig,
         openTelemetry,
+        channelPoolSettings,
         baseHashCode());
   }
 
@@ -451,6 +468,7 @@ public final class GrpcStorageOptions extends StorageOptions
         && Objects.equals(grpcInterceptorProvider, that.grpcInterceptorProvider)
         && Objects.equals(blobWriteSessionConfig, that.blobWriteSessionConfig)
         && Objects.equals(openTelemetry, that.openTelemetry)
+        && Objects.equals(channelPoolSettings, that.channelPoolSettings)
         && this.baseEquals(that);
   }
 
@@ -501,6 +519,7 @@ public final class GrpcStorageOptions extends StorageOptions
     private BlobWriteSessionConfig blobWriteSessionConfig =
         GrpcStorageDefaults.INSTANCE.getDefaultStorageWriterConfig();
     private OpenTelemetry openTelemetry = GrpcStorageDefaults.INSTANCE.getDefaultOpenTelemetry();
+    private ChannelPoolSettings channelPoolSettings;
 
     private boolean grpcMetricsManuallyEnabled = false;
 
@@ -516,6 +535,7 @@ public final class GrpcStorageOptions extends StorageOptions
       this.grpcInterceptorProvider = gso.grpcInterceptorProvider;
       this.blobWriteSessionConfig = gso.blobWriteSessionConfig;
       this.openTelemetry = gso.openTelemetry;
+      this.channelPoolSettings = gso.channelPoolSettings;
     }
 
     /**
@@ -747,6 +767,28 @@ public final class GrpcStorageOptions extends StorageOptions
     public GrpcStorageOptions.Builder setOpenTelemetry(OpenTelemetry openTelemetry) {
       requireNonNull(openTelemetry, "openTelemetry must be non null");
       this.openTelemetry = openTelemetry;
+      return this;
+    }
+
+    /**
+     * Set the {@link ChannelPoolSettings} used to configure the pool of gRPC channels underlying
+     * this client.
+     *
+     * <p>By default a single gRPC channel is used. If you expect a high number of concurrent RPCs
+     * (for example many concurrent resumable uploads), configuring a larger channel pool can
+     * improve throughput and tail latency.
+     *
+     * <p>If unset, the default channel pool configuration is used.
+     *
+     * @param channelPoolSettings a non-null ChannelPoolSettings to use
+     * @return the builder
+     * @since 2.65.0 This new api is in preview and is subject to breaking changes.
+     */
+    @BetaApi
+    public GrpcStorageOptions.Builder setChannelPoolSettings(
+        @NonNull ChannelPoolSettings channelPoolSettings) {
+      this.channelPoolSettings =
+          requireNonNull(channelPoolSettings, "channelPoolSettings must be non null");
       return this;
     }
 
